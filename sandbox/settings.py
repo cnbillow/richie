@@ -194,6 +194,34 @@ class Base(StyleguideMixin, DRFMixin, RichieCoursesConfigurationMixin, Configura
     SOCIAL_AUTH_EDX_OIDC_ENDPOINT = values.Value()
     SOCIAL_AUTH_POSTGRES_JSONFIELD = False  # Mysql compatibility by default
 
+    # LMS
+    LMS_BACKENDS = [
+        {
+            # We configure default values that work with the test configuration of the hawthorn
+            # flavor of github.com/openfun/openedx-docker.
+            "BACKEND": "richie.apps.courses.lms.edx.EdXLMSBackend",
+            "SELECTOR_REGEX": values.Value(
+                r".*localhost:8073/course.*",
+                environ_name="LMS_SELECTOR_REGEX",
+                environ_prefix=None,
+            ),
+            "COURSE_REGEX": values.Value(
+                r"^.*/courses/(?P<course_id>.*)/info$",
+                environ_name="LMS_COURSE_REGEX",
+                environ_prefix=None,
+            ),
+            "OAUTH2_KEY": values.Value(
+                "edx-id", environ_name="LMS_OAUTH2_KEY", environ_prefix=None
+            ),
+            "OAUTH2_SECRET": values.Value(
+                "fakesecret", environ_name="LMS_OAUTH2_SECRET", environ_prefix=None
+            ),
+            "BASE_URL": values.Value(
+                "http://edx:8073", environ_name="LMS_BASE_URL", environ_prefix=None
+            ),
+        }
+    ]
+
     # Internationalization
     TIME_ZONE = "Europe/Paris"
     USE_I18N = True
