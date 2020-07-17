@@ -4,6 +4,7 @@ End-to-end tests for the course detail view
 import re
 from datetime import timedelta
 
+from django.test.utils import override_settings
 from django.utils import dateformat, timezone
 
 import pytz
@@ -356,7 +357,7 @@ class RunsCourseCMSTestCase(CMSTestCase):
         super().setUp()
         self.now = timezone.now()
 
-    def create_run_ongoing_open(self, course):
+    def create_run_ongoing_open(self, course, **kwargs):
         """
         Not a test. Create an on-going course run that is open for enrollment.
         """
@@ -368,9 +369,10 @@ class RunsCourseCMSTestCase(CMSTestCase):
             enrollment_start=self.now - timedelta(hours=1),
             enrollment_end=self.now + timedelta(hours=1),
             should_publish=True,
+            **kwargs
         )
 
-    def create_run_future_open(self, course):
+    def create_run_future_open(self, course, **kwargs):
         """
         Not a test. Create a course run in the future and open for enrollment.
         """
@@ -381,6 +383,7 @@ class RunsCourseCMSTestCase(CMSTestCase):
             enrollment_start=self.now - timedelta(hours=1),
             enrollment_end=self.now + timedelta(hours=1),
             should_publish=True,
+            **kwargs
         )
 
     def create_run_future_not_yet_open(self, course):
@@ -433,6 +436,7 @@ class RunsCourseCMSTestCase(CMSTestCase):
             should_publish=True,
         )
 
+    @override_settings(LMS_BACKENDS=[])
     def test_templates_course_detail_runs_ongoing_open(self):
         """
         Priority 0: a course run open and on-going should always show up.
@@ -462,6 +466,42 @@ class RunsCourseCMSTestCase(CMSTestCase):
             ),
         )
 
+    @override_settings(
+        LMS_BACKENDS=[
+            {
+                "BACKEND": "richie.apps.courses.lms.edx.EdXLMSBackend",
+                "COURSE_REGEX": r"^.*/courses/(?P<course_id>.*)/course/?$",
+                "BASE_URL": "http://example.edx:8073",
+                "OAUTH2_KEY": "edx-id",
+                "OAUTH2_SECRET": "fakesecret",
+            }
+        ]
+    )
+    def test_templates_course_detail_runs_ongoing_open_with_enrollments_app(self):
+        """
+        Priority 0: when the enrollments app is enabled, responsibility for the
+        CTA is delegated to the frontend component.
+        """
+        course = CourseFactory(should_publish=True)
+        course_run = self.create_run_ongoing_open(
+            course,
+            resource_link="http://example.edx:8073/courses/course-v1:edX+DemoX+Demo/course/",
+        )
+        response = self.client.get(course.extended_object.get_absolute_url())
+
+        self.assertIsNotNone(
+            re.search(
+                (
+                    r'.*class="richie-react richie-react--course-run-enrollment".*'
+                    r"data-props=\\\'{{\"courseRunId\": {}}}\\\'".format(
+                        course_run.public_extension_id
+                    )
+                ),
+                str(response.content),
+            )
+        )
+
+    @override_settings(LMS_BACKENDS=[])
     def test_templates_course_detail_runs_future_open(self):
         """
         Priority 1: an upcoming open course run should show in a separate section.
@@ -489,6 +529,40 @@ class RunsCourseCMSTestCase(CMSTestCase):
                 'course-detail__runs--inactive">'
                 '<h3 class="course-detail__title">'
             ),
+        )
+
+    @override_settings(
+        LMS_BACKENDS=[
+            {
+                "BACKEND": "richie.apps.courses.lms.edx.EdXLMSBackend",
+                "COURSE_REGEX": r"^.*/courses/(?P<course_id>.*)/course/?$",
+                "BASE_URL": "http://example.edx:8073",
+                "OAUTH2_KEY": "edx-id",
+                "OAUTH2_SECRET": "fakesecret",
+            }
+        ]
+    )
+    def test_templates_course_detail_runs_future_open_with_enrollments_app(self):
+        """
+        Priority 1: when the enrollments app is enabled, responsibility for the
+        CTA is delegated to the frontend component.
+        """
+        course = CourseFactory(should_publish=True)
+        course_run = self.create_run_future_open(
+            course,
+            resource_link="http://example.edx:8073/courses/course-v1:edX+DemoX+Demo/course/",
+        )
+        response = self.client.get(course.extended_object.get_absolute_url())
+        self.assertIsNotNone(
+            re.search(
+                (
+                    r'.*class="richie-react richie-react--course-run-enrollment".*'
+                    r"data-props=\\\'{{\"courseRunId\": {}}}\\\'".format(
+                        course_run.public_extension_id
+                    )
+                ),
+                str(response.content),
+            )
         )
 
     @timezone.override(pytz.utc)

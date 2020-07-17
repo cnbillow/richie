@@ -1,9 +1,11 @@
 """
 End-to-end tests for the course run detail view
 """
+import re
 from datetime import datetime
 from unittest import mock
 
+from django.test.utils import override_settings
 from django.utils import timezone
 
 import pytz
@@ -271,15 +273,16 @@ class CourseRunCMSTestCase(CMSTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<meta name="robots" content="noindex">')
 
-    def prepare_to_test_state(self, state):
+    def prepare_to_test_state(self, state, **kwargs):
         """
         Not a test.
         Create objects and mock to help testing the impact of the state on template rendering.
         """
         course = CourseFactory(should_publish=True)
+        resource_link = kwargs.get("resource_link") or "https://www.example.com/enroll"
         course_run = CourseRunFactory(
             page_parent=course.extended_object,
-            resource_link="https://www.example.com/enroll",
+            resource_link=resource_link,
             should_publish=True,
         )
 
@@ -290,11 +293,12 @@ class CourseRunCMSTestCase(CMSTestCase):
             response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        return response
+        return (response, course_run)
 
-    def test_templates_course_run_detail_state_with_cta(self):
+    @override_settings(LMS_BACKENDS=[])
+    def test_templates_course_run_detail_state_without_enrollments_app_with_cta(self):
         """A course run in a state with a call to action should include a link and the CTA."""
-        response = self.prepare_to_test_state(CourseState(0, timezone.now()))
+        response, _ = self.prepare_to_test_state(CourseState(0, timezone.now()))
         self.assertContains(
             response,
             '<a class="subheader__cta" '
@@ -302,14 +306,75 @@ class CourseRunCMSTestCase(CMSTestCase):
             html=True,
         )
 
-    def test_templates_course_run_detail_state_without_cta(self):
+    @override_settings(LMS_BACKENDS=[])
+    def test_templates_course_run_detail_state_without_enrollments_app_without_cta(
+        self,
+    ):
         """A course run in a state without a call to action should include a state button."""
-        response = self.prepare_to_test_state(CourseState(6))
+        response, _ = self.prepare_to_test_state(CourseState(6))
         self.assertContains(
             response,
             '<button class="subheader__cta '
             'subheader__cta--projected">To be scheduled</button>',
             html=True,
+        )
+
+    @override_settings(
+        LMS_BACKENDS=[
+            {
+                "BACKEND": "richie.apps.courses.lms.edx.EdXLMSBackend",
+                "COURSE_REGEX": r"^.*/courses/(?P<course_id>.*)/course/?$",
+                "BASE_URL": "http://example.edx:8073",
+                "OAUTH2_KEY": "edx-id",
+                "OAUTH2_SECRET": "fakesecret",
+            }
+        ]
+    )
+    def test_templates_course_run_detail_state_with_enrollments_app_with_cta(self):
+        """A course run in a state with a call to action just calls the frontend component."""
+        response, course_run = self.prepare_to_test_state(
+            CourseState(0, timezone.now()),
+            resource_link="http://example.edx:8073/courses/course-v1:edX+DemoX+Demo/course/",
+        )
+        self.assertIsNotNone(
+            re.search(
+                (
+                    r'.*class="richie-react richie-react--course-run-enrollment".*'
+                    r"data-props=\\\'{{\"courseRunId\": {}}}\\\'".format(
+                        course_run.public_extension_id
+                    )
+                ),
+                str(response.content),
+            )
+        )
+
+    @override_settings(
+        LMS_BACKENDS=[
+            {
+                "BACKEND": "richie.apps.courses.lms.edx.EdXLMSBackend",
+                "COURSE_REGEX": r"^.*/courses/(?P<course_id>.*)/course/?$",
+                "BASE_URL": "http://example.edx:8073",
+                "OAUTH2_KEY": "edx-id",
+                "OAUTH2_SECRET": "fakesecret",
+            }
+        ]
+    )
+    def test_templates_course_run_detail_state_with_enrollments_app_without_cta(self):
+        """A course run in a state without a call to action just calls the frontend component."""
+        response, course_run = self.prepare_to_test_state(
+            CourseState(6, timezone.now()),
+            resource_link="http://example.edx:8073/courses/course-v1:edX+DemoX+Demo/course/",
+        )
+        self.assertIsNotNone(
+            re.search(
+                (
+                    r'.*class="richie-react richie-react--course-run-enrollment".*'
+                    r"data-props=\\\'{{\"courseRunId\": {}}}\\\'".format(
+                        course_run.public_extension_id
+                    )
+                ),
+                str(response.content),
+            )
         )
 
     # Breadcrumb
